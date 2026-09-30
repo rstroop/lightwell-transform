@@ -93,7 +93,8 @@ def check_catalog_freshness(filepath):
         print(f"Your catalog.json is {catalog_age_hours:.1f} hours old (threshold: 48h).")
         print()
         print("The remediated-Java catalog updates frequently. To ensure the")
-        print("audit results are current, download a fresh copy from:")
+        print("audit results are current, download a fresh copy from your lightwell console")
+        print("which should look like this:")
         print()
         print("  https://lightwell-console-lightwell.apps.virt.na-launch.com/api/catalog")
         print()
@@ -275,7 +276,7 @@ def build_catalog_dict(catalog_path):
     if not os.path.exists(catalog_path):
         print("Error: catalog.json not found.")
         print()
-        print("Download it from:")
+        print("Download it from your lightwell console which should look like this:")
         print("  https://lightwell-console-lightwell.apps.virt.na-launch.com/api/catalog")
         print()
         print(f"Then place it here: {catalog_path}")
