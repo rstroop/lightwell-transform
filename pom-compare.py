@@ -30,6 +30,19 @@ What this script does
    (default properties / per-profile overrides), plus a global summary across all
    scanned POM files.
 
+Catalog shapes
+--------------
+
+``build_catalog_dict`` indexes either (or both) of these JSON shapes into the same
+lookup dict:
+
+* **offerings** (console/API catalog) — ``offerings[].components[]`` with ``g`` /
+  ``a`` / ``v``
+* **remediations** (flat remediation list) — ``remediations[]`` with ``groupId`` /
+  ``artifactId`` / ``toVersion`` (and optional ``tier``)
+
+Matching logic is unchanged; only catalog loading is extended.
+
 Version semantics
 -----------------
 
@@ -73,7 +86,7 @@ def load_local_json(filepath):
             return json.load(f)
     except FileNotFoundError:
         print(f"Error: catalog file not found at {filepath}")
-        return {"offerings": []}
+        return {"offerings": [], "remediations": []}
 
 
 def check_catalog_freshness(filepath):
@@ -235,7 +248,13 @@ def match_against_catalog(components, catalog_dict):
                 print(f"[NEEDS UPDATE] rhlw revision behind --- {display_name} -> {best_newer}")
                 needs_update.add((group, name, version, best_newer))
             else:
-                print(f"[OK UP-TO-DATE] exact match in offering(s): {', '.join(sorted(exact_offerings))} --- {display_name}")
+                # Exact match = POM version is already the Lightwell remediation build
+                # (e.g. already on 1.2.11.rhlw-00001), not merely the same community base.
+                print(
+                    f"[OK UP-TO-DATE] exact match "
+                    f"(POM already on Lightwell remediation version) "
+                    f"in offering(s): {', '.join(sorted(exact_offerings))} --- {display_name}"
+                )
         elif same_base:
             # No exact match, but a Lightwell version exists at this base version.
             best = sorted(same_base, key=lambda v: _rhlw_revision(v) or 0, reverse=True)[0]
@@ -272,7 +291,12 @@ def find_pom_files(directory):
 # Helper: build a look-up dict from the downloaded catalog.json
 # ---------------------------------------------------------------------------
 def build_catalog_dict(catalog_path):
-    """Load the catalog JSON and index by (group, artifact) -> {version -> set(offerings)}."""
+    """Load the catalog JSON and index by (group, artifact) -> {version -> set(offerings)}.
+
+    Supports both catalog shapes without changing match behavior:
+    - offerings[].components[] with g / a / v (existing API catalog)
+    - remediations[] with groupId / artifactId / toVersion (flat remediation list)
+    """
     if not os.path.exists(catalog_path):
         print("Error: catalog.json not found.")
         print()
@@ -288,22 +312,37 @@ def build_catalog_dict(catalog_path):
 
     catalog_dict = {}
 
+    def _index(g, a, v, label):
+        """Add one component version into the shared lookup dict."""
+        if not g or not a or not v:
+            return
+        key = (g, a)
+        if key not in catalog_dict:
+            catalog_dict[key] = {}
+        if v not in catalog_dict[key]:
+            catalog_dict[key][v] = set()
+        catalog_dict[key][v].add(label)
+
+    # Existing shape — offerings / components / g,a,v
     for offering in catalog_data.get('offerings', []):
         offering_name = offering.get('name') or "Unknown Offering"
 
         for comp in offering.get('components', []):
-            g = comp.get('g') or ""
-            a = comp.get('a') or ""
-            v = comp.get('v') or ""
+            _index(
+                comp.get('g') or "",
+                comp.get('a') or "",
+                comp.get('v') or "",
+                offering_name,
+            )
 
-            key = (g, a)
-            if key not in catalog_dict:
-                catalog_dict[key] = {}
-
-            if v not in catalog_dict[key]:
-                catalog_dict[key][v] = set()
-
-            catalog_dict[key][v].add(offering_name)
+    # Additive shape — remediations / groupId, artifactId, toVersion
+    for item in catalog_data.get('remediations', []):
+        _index(
+            item.get('groupId') or "",
+            item.get('artifactId') or "",
+            item.get('toVersion') or "",
+            item.get('tier') or "remediation",
+        )
 
     return catalog_dict
 
@@ -372,6 +411,12 @@ def audit_single_pom(pom_path, catalog_dict):
     profile_updates = {}  # {profile_id: set of updates}
 
     # -- Audit always-active dependencies --
+    print("Status key:")
+    print("  exact match         = POM already on the Lightwell remediation version (e.g. 1.2.11.rhlw-00001)")
+    print("  needs update        = same base version; community/older rhlw can move to catalog remediation")
+    print("  base-version mismatch = artifact in catalog, but not at this POM base version")
+    print("  not in catalog      = artifact not present in catalog")
+    print()
     print("=== ALWAYS ACTIVE (no profile overrides these) ===")
     if always_components:
         updated = match_against_catalog(always_components, catalog_dict)

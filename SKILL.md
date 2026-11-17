@@ -5,7 +5,9 @@ description: >-
   Parses POM files in a folder or git repo, compares each dependency to the lightwell catalog,
   and reports status: exact match, needs update, or base-version mismatch.
   Manages the git workflow for updating a repository with new dependencies.
-version: "0.0.2"
+  REQUIRED: every user-facing audit report MUST include the Status key block
+  (exact match / needs update / base-version mismatch / not in catalog) before listing dependencies.
+version: "0.0.4"
 ---
 
 # Lightwell Transform Skill
@@ -14,7 +16,30 @@ version: "0.0.2"
 
 **Execute ALL steps continuously without pausing.** Do NOT present intermediate summaries, plans, status updates, or ask for input. Run every step back-to-back in a single turn. **Only pause for explicitly required user questions:** Do not use todo lists or present plans. Just **do it**.
 
+**MUST include the status key in every user-facing audit report** (audit-only and full workflow). This is mandatory even when reformatting `pom-compare.py` output into tables or summaries. Do not omit, paraphrase away, or collapse the key. Paste this block verbatim near the top of the report:
+
+```text
+Status key:
+  exact match         = POM already on the Lightwell remediation version (e.g. 1.2.11.rhlw-00001)
+  needs update        = same base version; community/older rhlw can move to catalog remediation
+  base-version mismatch = artifact in catalog, but not at this POM base version
+  not in catalog      = artifact not present in catalog
+```
+
+A remediation match that is not yet applied is **needs update**, not exact match. Incomplete reports that lack this status key are invalid — fix the report before stopping.
+
 Given a directory containing one or more Maven `pom.xml` files and a local `catalog.json`, produce a full audit report identifying every dependency's alignment with Project Lightwell remediated versions. The `catalog.json` cannot be downloaded automatically nor ship with the skill — it must be added by the user and excluded from version control (add to `.gitignore`).
+
+
+## Required audit report checklist
+
+Before finishing any audit (including audit-only), the user-facing report MUST contain all of:
+
+1. The verbatim **Status key** block from Critical execution rules (above)
+2. Every dependency labeled with exactly one status from that key
+3. The actionable updates summary from `pom-compare.py`
+
+If any item is missing, the report is incomplete — add it before stopping.
 
 ## What the POM compare script does
 
@@ -69,6 +94,8 @@ python pom-compare.py <target-dir> <skill-path>/catalog.json
 ```
 
 **Do not stop until the audit returns results.** If catalog is stale, remind the user to consider updating it when a pause occurs. The catalog is behind an authorization wall, do not download it automatically, have the user download it and verify it is valid json before replacing the stale copy.
+
+**Final audit report:** Follow the Critical execution rules status-key requirement above. List every dependency with one of those statuses after the verbatim status key block.
 
 ### Step 4: Scope confirmation
 
